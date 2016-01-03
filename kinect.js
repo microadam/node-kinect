@@ -49,6 +49,10 @@ Context.prototype.tilt = function tilt(angle) {
   this._kContext.tilt(angle);
 };
 
+Context.prototype.setVideoMode = function setVideoMode(mode) {
+  this._kContext.setVideoMode(mode);
+};
+
 Context.prototype.close = function close() {
   this._kContext.close();
 };
@@ -64,7 +68,8 @@ Context.prototype.pause = function() {
 module.exports = function(options) {
   if (! options) options = {};
   if (! options.device) options.device = 0;
-  var kContext = new kinect.Context(options.device);
+  if (! options.mode) options.mode = 'RGB';
+  var kContext = new kinect.Context(options.device, options.mode);
   var context = new Context(kContext);
   kContext._context = context;
 

@@ -37,7 +37,7 @@ namespace kinect {
       uv_async_t             uv_async_depth_callback_;
 
     private:
-      Context(int user_device_number);
+      Context(int user_device_number, std::string video_mode);
       static Handle<Value>  New              (const Arguments& args);
       static Context*       GetContext       (const Arguments &args);
 
@@ -49,6 +49,9 @@ namespace kinect {
 
       void                  Tilt             (const double angle);
       static Handle<Value>  Tilt             (const Arguments &args);
+
+      void                  SetVideoMode     (const std::string mode);
+      static Handle<Value>  SetVideoMode     (const Arguments &args);
 
       void                  SetDepthCallback ();
       static Handle<Value>  SetDepthCallback (const Arguments &args);
@@ -346,6 +349,53 @@ namespace kinect {
     return Undefined();
   }
 
+  /**** Video Mode Control ******/
+
+  void
+  Context::SetVideoMode(const std::string mode) {
+    freenect_frame_mode frameMode;
+
+    if (mode.compare("RGB") == 0) {
+      frameMode = freenect_find_video_mode(FREENECT_RESOLUTION_MEDIUM, FREENECT_VIDEO_RGB);
+    } else if (mode.compare("IR") == 0) {
+      frameMode = freenect_find_video_mode(FREENECT_RESOLUTION_MEDIUM, FREENECT_VIDEO_IR_8BIT);
+    } else {
+      ThrowException(Exception::Error(String::New("Did not recognize given video mode")));
+      return;
+    }
+
+    videoMode_ = frameMode;
+
+    freenect_stop_video(device_);
+
+    if (freenect_set_video_mode(device_, frameMode) < 0) {
+      ThrowException(Exception::Error(String::New("Error setting video mode")));
+      return;
+    }
+
+    if (freenect_start_video(device_) != 0) {
+      ThrowException(Exception::Error(String::New("Error starting video")));
+      return;
+    }
+  }
+
+  Handle<Value>
+  Context::SetVideoMode(const Arguments& args) {
+    HandleScope scope;
+
+    if (args.Length() == 1) {
+      if (!args[0]->IsString()) {
+        return ThrowException(Exception::TypeError(
+          String::New("video mode must be a string")));
+      }
+    } else {
+      return ThrowException(Exception::Error(String::New("Expecting at least one argument with the video mode")));
+    }
+
+    String::AsciiValue val(args[0]->ToString());
+    GetContext(args)->SetVideoMode(std::string(*val));
+    return Undefined();
+  }
 
   /********* Life Cycle ***********/
 
@@ -356,19 +406,22 @@ namespace kinect {
     assert(args.IsConstructCall());
 
     int user_device_number = 0;
-    if (args.Length() == 1) {
-      if (!args[0]->IsNumber()) {
-        return ThrowException(Exception::TypeError(
-          String::New("user_device_number must be an integer")));
-      }
-      user_device_number = (int) args[0]->ToInteger()->Value();
-      if (user_device_number < 0) {
-        return ThrowException(Exception::RangeError(
-          String::New("user_device_number must be a natural number")));
-      }
+    if (!args[0]->IsNumber()) {
+      return ThrowException(Exception::TypeError(
+        String::New("user_device_number must be an integer")));
     }
+    user_device_number = (int) args[0]->ToInteger()->Value();
+    if (user_device_number < 0) {
+      return ThrowException(Exception::RangeError(
+        String::New("user_device_number must be a natural number")));
+    }
+    if (!args[1]->IsString()) {
+      return ThrowException(Exception::TypeError(
+        String::New("video mode must be a string")));
+    }
+    String::AsciiValue video_mode(args[1]->ToString());
 
-    Context *context = new Context(user_device_number);
+    Context *context = new Context(user_device_number, std::string(*video_mode));
     context->Wrap(args.This());
 
     return args.This();
@@ -383,6 +436,7 @@ namespace kinect {
 
     NODE_SET_PROTOTYPE_METHOD(t, "close", Close);
     NODE_SET_PROTOTYPE_METHOD(t, "led",   Led);
+    NODE_SET_PROTOTYPE_METHOD(t, "setVideoMode", SetVideoMode);
     NODE_SET_PROTOTYPE_METHOD(t, "tilt",   Tilt);
     NODE_SET_PROTOTYPE_METHOD(t, "setDepthCallback", SetDepthCallback);
     NODE_SET_PROTOTYPE_METHOD(t, "setVideoCallback", SetVideoCallback);
@@ -392,7 +446,7 @@ namespace kinect {
     target->Set(String::NewSymbol("Context"), t->GetFunction());
   }
 
-  Context::Context(int user_device_number) : ObjectWrap() {
+  Context::Context(int user_device_number, std::string video_mode) : ObjectWrap() {
     context_         = NULL;
     device_          = NULL;
     depthCallback_   = false;
@@ -421,9 +475,15 @@ namespace kinect {
 
     freenect_set_user(device_, this);
 
-    // Initialize video mode
-    videoMode_ = freenect_find_video_mode(FREENECT_RESOLUTION_MEDIUM, FREENECT_VIDEO_RGB);
-    assert(videoMode_.is_valid);
+    if (video_mode.compare("IR") == 0) {
+      // Initialize IR video mode
+      videoMode_ = freenect_find_video_mode(FREENECT_RESOLUTION_MEDIUM, FREENECT_VIDEO_IR_8BIT);
+      assert(videoMode_.is_valid);
+    } else {
+      // Initialize RGB video mode
+      videoMode_ = freenect_find_video_mode(FREENECT_RESOLUTION_MEDIUM, FREENECT_VIDEO_RGB);
+      assert(videoMode_.is_valid);
+    }
 
     // Initialize depth mode
     depthMode_ = freenect_find_depth_mode(FREENECT_RESOLUTION_MEDIUM, FREENECT_DEPTH_11BIT);
